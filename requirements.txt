@@ -1,0 +1,19 @@
+# requirements.txt
+# Generated from project scan on 2025-11-06
+# Include Python packages required to run this project.
+# Install with: pip install -r requirements.txt
+
+# Image handling (used by shogi.py)
+Pillow==11.3.0
+
+# Optional: Raspberry Pi GPIO (only needed if running on Raspberry Pi hardware)
+# If you deploy to a Raspberry Pi, uncomment the following line and install
+# RPi.GPIO==<version> or install it via the system package manager.
+# RPi.GPIO
+
+# Notes:
+# - The project also uses a native library loaded by `cdio.py` (libcdio.so).
+#   That is a system library and must be installed on the OS (not via pip).
+# - If you want exact, complete pins for your current virtualenv, run
+#   `pip freeze > requirements.txt` in the activated virtualenv and commit the result
+#   (but do NOT commit the virtualenv directory itself).
