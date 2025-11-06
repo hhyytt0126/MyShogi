@@ -56,20 +56,61 @@ class HomeApp:
 		rules_btn = tk.Button(self.frame, text="ルール(簡易)", command=self.show_rules, **{**btn_style, "bg": "#2196F3", "activebackground": "#1e88e5"})
 		rules_btn.pack(pady=8)
 
-		exit_btn = tk.Button(self.frame, text="終了", command=self.root.destroy, **{**btn_style, "bg": "#e53935", "activebackground": "#d32f2f"})
+		exit_btn = tk.Button(self.frame, text="終了", command=self._on_exit, **{**btn_style, "bg": "#e53935", "activebackground": "#d32f2f"})
 		exit_btn.pack(pady=32)
+
+		# menu button list for keypad navigation
+		self.menu_buttons = [start_btn, ai_btn, rules_btn, exit_btn]
+		# store original bg colors so we can restore when selection changes
+		self._menu_bg = [b.cget("bg") for b in self.menu_buttons]
+		self._menu_index = 0
+		self._update_menu_selection()
+
+		# try to register keypad callback (safe on non-RPi)
+		try:
+			import key_pad
+			try:
+				key_pad.start_polling()
+			except Exception:
+				pass
+			def _on_keypad_key(key):
+				if not key:
+					return
+				if key == '5':
+					# confirm
+					self.menu_buttons[self._menu_index].invoke()
+					return
+				if key == '8':
+					# up
+					self._menu_index = (self._menu_index - 1) % len(self.menu_buttons)
+					self._update_menu_selection()
+					return
+				if key == '2':
+					# down
+					self._menu_index = (self._menu_index + 1) % len(self.menu_buttons)
+					self._update_menu_selection()
+			try:
+				key_pad.register_callback(_on_keypad_key)
+				self._keypad_cb = _on_keypad_key
+			except Exception:
+				self._keypad_cb = None
+		except Exception:
+			self._keypad_cb = None
 
 
 	def start_game(self):
 		# 遅延インポートで循環依存や起動の重さを回避
 		from shogi import ShogiApp
 
+		# cleanup keypad registration before switching UI
+		self._cleanup_keypad()
 		# ホームUIを消してゲームを起動（同じTkルートを使う）
 		self.frame.destroy()
 		ShogiApp(self.root, ai_enabled=False)
 
 	def start_game_vs_ai(self):
 		from shogi import ShogiApp
+		self._cleanup_keypad()
 		self.frame.destroy()
 		# 先手=人間, 後手=AI (byoyomi 2000ms)
 		ShogiApp(self.root, ai_enabled=True, ai_side='後手', ai_byoyomi_ms=2000)
@@ -84,6 +125,38 @@ class HomeApp:
 			"- 終局: 詰み判定で結果表示\n"
 		)
 		messagebox.showinfo("ルール(簡易)", message)
+
+	def _update_menu_selection(self):
+		# Visualize selection by changing relief and focus
+		for i, btn in enumerate(self.menu_buttons):
+			if i == self._menu_index:
+				btn.config(relief=tk.SUNKEN)
+				try:
+					btn.focus_set()
+				except Exception:
+					pass
+			else:
+				btn.config(relief=tk.FLAT)
+
+	def _cleanup_keypad(self):
+		# Unregister keypad callback and stop polling if available
+		try:
+			import key_pad
+			if getattr(self, "_keypad_cb", None):
+				try:
+					key_pad.unregister_callback(self._keypad_cb)
+				except Exception:
+					pass
+			try:
+				key_pad.stop_polling()
+			except Exception:
+				pass
+		except Exception:
+			pass
+
+	def _on_exit(self):
+		self._cleanup_keypad()
+		self.root.destroy()
 
 
 if __name__ == "__main__":

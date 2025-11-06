@@ -157,44 +157,43 @@ class ShogiApp:
             pass
         # 描画しておく（メソッドはクラス内で定義）
         try:
-            # start keypad polling thread if key_pad is available
+            # Prefer callback-based integration using key_pad module
             import key_pad
 
-            def _keypad_worker():
-                while True:
-                    try:
-                        key = key_pad.read_keypad()
-                    except Exception as e:
-                        print(f"Keypad read error: {e}")
-                        break
-                    if not key:
-                        time.sleep(0.05)
-                        continue
-                    # map numeric keypad to moves (numpad layout)
-                    if key == '5':
-                        # confirm/enter
-                        self.root.after(0, lambda: self.keypad_confirm())
-                    else:
-                        moves = {
-                            '8': (-1, 0),  # up
-                            '2': (1, 0),   # down
-                            '4': (0, -1),  # left
-                            '6': (0, 1),   # right
-                            '7': (-1, -1), # up-left
-                            '9': (-1, 1),  # up-right
-                            '1': (1, -1),  # down-left
-                            '3': (1, 1),   # down-right
-                        }
-                        if key in moves:
-                            dr, dc = moves[key]
-                            self.root.after(0, lambda dr=dr, dc=dc: self.move_keypad_cursor(dr, dc))
-                    # small debounce
-                    time.sleep(0.05)
+            # start polling if supported (no-op on non-RPi)
+            try:
+                key_pad.start_polling()
+            except Exception:
+                pass
 
-            threading.Thread(target=_keypad_worker, daemon=True).start()
+            def _on_keypad_key(key):
+                if not key:
+                    return
+                # 5 = confirm
+                if key == '5':
+                    self.root.after(0, lambda: self.keypad_confirm())
+                    return
+                moves = {
+                    '8': (-1, 0),  # up
+                    '2': (1, 0),   # down
+                    '4': (0, -1),  # left
+                    '6': (0, 1),   # right
+                    '7': (-1, -1), # up-left
+                    '9': (-1, 1),  # up-right
+                    '1': (1, -1),  # down-left
+                    '3': (1, 1),   # down-right
+                }
+                if key in moves:
+                    dr, dc = moves[key]
+                    self.root.after(0, lambda dr=dr, dc=dc: self.move_keypad_cursor(dr, dc))
+
+            try:
+                key_pad.register_callback(_on_keypad_key)
+                self._keypad_cb = _on_keypad_key
+            except Exception:
+                self._keypad_cb = None
         except Exception:
-            # key_pad not available on this platform; ignore
-            pass
+            self._keypad_cb = None
         
     def create_game_control_buttons(self):
         # 下部パネルに「ホームへ戻る」「ヒント」「降参」ボタンを中央揃えで横に配置
@@ -211,6 +210,20 @@ class ShogiApp:
 
     def go_home(self):
         # 盤面UIを破棄してホーム画面へ
+        # unregister keypad callback if any
+        try:
+            import key_pad
+            if getattr(self, '_keypad_cb', None):
+                try:
+                    key_pad.unregister_callback(self._keypad_cb)
+                except Exception:
+                    pass
+            try:
+                key_pad.stop_polling()
+            except Exception:
+                pass
+        except Exception:
+            pass
         self.canvas.destroy()
         try:
             self.btn_home.destroy()
