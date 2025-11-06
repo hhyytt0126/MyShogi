@@ -45,6 +45,8 @@ if _GPIO_AVAILABLE:
 _callbacks = []
 _poll_thread = None
 _poll_thread_stop = False
+_last_key = None
+_last_time = 0.0
 
 def register_callback(fn):
     """Register a callback fn(key: str) to be called on key press."""
@@ -84,6 +86,23 @@ def unregister_all():
 
 def _notify(key: str):
     # Print the key for debug/visibility
+    global _last_key, _last_time
+    try:
+        now = time.time()
+        # simple debounce/ghosting suppression: if a different key arrives within 80ms, ignore it
+        if _last_key is not None and (now - _last_time) < 0.08 and key != _last_key:
+            try:
+                print(f"[key_pad] suppressed key due to debounce: {key} (last={_last_key})")
+            except Exception:
+                pass
+            # update last seen but do not notify callbacks
+            _last_key = key
+            _last_time = now
+            return
+        _last_key = key
+        _last_time = now
+    except Exception:
+        pass
     try:
         print(f"[key_pad] key pressed: {key}")
     except Exception:
