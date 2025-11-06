@@ -70,6 +70,12 @@ class HomeApp:
 		try:
 			import key_pad
 			try:
+				# Ensure no stale callbacks remain (prevent duplicate calls after UI switches)
+				try:
+					if hasattr(key_pad, "unregister_all"):
+						key_pad.unregister_all()
+				except Exception:
+					pass
 				key_pad.start_polling()
 			except Exception:
 				pass
@@ -147,8 +153,16 @@ class HomeApp:
 					key_pad.unregister_callback(self._keypad_cb)
 				except Exception:
 					pass
+				# clear stored reference
+				self._keypad_cb = None
 			try:
 				key_pad.stop_polling()
+			except Exception:
+				pass
+			# best-effort: clear any leftover callbacks to avoid duplicates on re-entry
+			try:
+				if hasattr(key_pad, "unregister_all"):
+					key_pad.unregister_all()
 			except Exception:
 				pass
 		except Exception:
