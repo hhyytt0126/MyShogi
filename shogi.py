@@ -274,6 +274,11 @@ class ShogiApp:
                     pass
             except Exception:
                 pass
+            try:
+                # force cleanup of any dangling callbacks to avoid duplicate handlers on restart
+                key_pad.unregister_all()
+            except Exception:
+                pass
         except Exception:
             pass
         self.canvas.destroy()

@@ -54,6 +54,10 @@ def register_callback(fn):
             print(f"[key_pad] callback registered: {getattr(fn, '__name__', repr(fn))}")
         except Exception:
             pass
+    try:
+        print(f"[key_pad] callbacks count: {len(_callbacks)}")
+    except Exception:
+        pass
 
 def unregister_callback(fn):
     """Unregister a previously registered callback."""
@@ -63,13 +67,29 @@ def unregister_callback(fn):
             print(f"[key_pad] callback unregistered: {getattr(fn, '__name__', repr(fn))}")
         except Exception:
             pass
+        try:
+            print(f"[key_pad] callbacks count: {len(_callbacks)}")
+        except Exception:
+            pass
     except ValueError:
+        pass
+
+def unregister_all():
+    """Unregister all callbacks (force-clean)."""
+    try:
+        _callbacks.clear()
+        print("[key_pad] all callbacks unregistered")
+    except Exception:
         pass
 
 def _notify(key: str):
     # Print the key for debug/visibility
     try:
         print(f"[key_pad] key pressed: {key}")
+    except Exception:
+        pass
+    try:
+        print(f"[key_pad] notifying {len(_callbacks)} callbacks")
     except Exception:
         pass
     for cb in list(_callbacks):
