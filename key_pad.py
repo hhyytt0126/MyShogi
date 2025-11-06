@@ -59,6 +59,11 @@ def unregister_callback(fn):
         pass
 
 def _notify(key: str):
+    # Print the key for debug/visibility
+    try:
+        print(f"[key_pad] key pressed: {key}")
+    except Exception:
+        pass
     for cb in list(_callbacks):
         try:
             cb(key)
