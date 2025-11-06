@@ -213,9 +213,11 @@ class ShogiApp:
         self.btn_home = tk.Button(self.root, text="ホームへ戻る", command=self.go_home, **btn_opts)
         self.btn_hint = tk.Button(self.root, text="ヒント", command=self.show_hint, **btn_opts)
         self.btn_resign = tk.Button(self.root, text="降参", command=self.resign_game, **btn_opts)
-        self.canvas.create_window(center_x - x_spacing, y, window=self.btn_home)
-        self.canvas.create_window(center_x, y, window=self.btn_hint)
-        self.canvas.create_window(center_x + x_spacing, y, window=self.btn_resign)
+        # store window ids so we can raise them after redraws
+        self._control_window_ids = []
+        self._control_window_ids.append(self.canvas.create_window(center_x - x_spacing, y, window=self.btn_home))
+        self._control_window_ids.append(self.canvas.create_window(center_x, y, window=self.btn_hint))
+        self._control_window_ids.append(self.canvas.create_window(center_x + x_spacing, y, window=self.btn_resign))
 
     def go_home(self):
         # 盤面UIを破棄してホーム画面へ
@@ -386,6 +388,15 @@ class ShogiApp:
                 if piece:
                     self.place_piece(piece, r, c)
         self.draw_captured_pieces()
+        # Ensure control windows (buttons) remain above canvas drawings
+        try:
+            for wid in getattr(self, '_control_window_ids', []):
+                try:
+                    self.canvas.tag_raise(wid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # キーパッドカーソルがあれば再描画
         try:
             self.draw_keypad_cursor()
@@ -446,14 +457,32 @@ class ShogiApp:
             return not is_sente_piece
 
     def on_click(self, event):
+        # Debug: log click
+        try:
+            print(f"[shogi.on_click] x={getattr(event,'x',None)} y={getattr(event,'y',None)} pending_move={self.pending_move} game_over={getattr(self,'game_over',False)} ai_thinking={getattr(self,'ai_thinking',False)} review={self.is_review_mode()}")
+        except Exception:
+            pass
+
         # 成り選択中/ゲーム終了時は他のクリックを無視
         if self.pending_move is not None or getattr(self, 'game_over', False):
+            try:
+                print("[shogi.on_click] Ignored: pending_move or game_over")
+            except Exception:
+                pass
             return
         # AI思考中は入力不可
         if getattr(self, 'ai_thinking', False):
+            try:
+                print("[shogi.on_click] Ignored: ai_thinking")
+            except Exception:
+                pass
             return
         # レビュー中（過去局面）なら指せない
         if self.is_review_mode():
+            try:
+                print("[shogi.on_click] Ignored: review mode")
+            except Exception:
+                pass
             return
         c = event.x // CELL_SIZE
         r = (event.y - self.top_offset) // CELL_SIZE
@@ -525,6 +554,10 @@ class ShogiApp:
 
     def select_captured_piece(self, idx, side):
         """持ち駒を選択"""
+        try:
+            print(f"[shogi.select_captured_piece] idx={idx} side={side} captured_counts=(sente={len(self.captured_by_sente)}, gote={len(self.captured_by_gote)})")
+        except Exception:
+            pass
         self.canvas.delete("captured_select")
         self.canvas.delete("select")
         self.canvas.delete("kiki")
