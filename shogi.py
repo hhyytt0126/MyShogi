@@ -177,15 +177,16 @@ class ShogiApp:
                 if key == '5':
                     self.root.after(0, lambda: self.keypad_confirm())
                     return
+                # Invert vertical direction: keypad '8' should move down and '2' should move up
                 moves = {
-                    '8': (-1, 0),  # up
-                    '2': (1, 0),   # down
+                    '8': (1, 0),   # down (was up)
+                    '2': (-1, 0),  # up (was down)
                     '4': (0, -1),  # left
                     '6': (0, 1),   # right
-                    '7': (-1, -1), # up-left
-                    '9': (-1, 1),  # up-right
-                    '1': (1, -1),  # down-left
-                    '3': (1, 1),   # down-right
+                    '7': (1, -1),  # down-left (was up-left)
+                    '9': (1, 1),   # down-right (was up-right)
+                    '1': (-1, -1), # up-left (was down-left)
+                    '3': (-1, 1),  # up-right (was down-right)
                 }
                 if key in moves:
                     dr, dc = moves[key]
