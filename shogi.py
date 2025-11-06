@@ -3,6 +3,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 from kiki import get_koma_kiki_sfen
 import threading
+import time
 import urllib.parse
 import urllib.request
 import json
@@ -144,6 +145,56 @@ class ShogiApp:
         # レビュー用コントロール作成 & 初期局面保存
         self.create_review_controls()
         self.create_game_control_buttons()
+        
+        # --- Keypad（物理キーパッド）からの操作対応 ---
+        # カーソル位置（盤上の行・列）を初期化（中央）
+        self.kp_r = BOARD_SIZE // 2
+        self.kp_c = BOARD_SIZE // 2
+        # 初期表示
+        try:
+            self.draw_keypad_cursor()
+        except Exception:
+            pass
+        # 描画しておく（メソッドはクラス内で定義）
+        try:
+            # start keypad polling thread if key_pad is available
+            import key_pad
+
+            def _keypad_worker():
+                while True:
+                    try:
+                        key = key_pad.read_keypad()
+                    except Exception as e:
+                        print(f"Keypad read error: {e}")
+                        break
+                    if not key:
+                        time.sleep(0.05)
+                        continue
+                    # map numeric keypad to moves (numpad layout)
+                    if key == '5':
+                        # confirm/enter
+                        self.root.after(0, lambda: self.keypad_confirm())
+                    else:
+                        moves = {
+                            '8': (-1, 0),  # up
+                            '2': (1, 0),   # down
+                            '4': (0, -1),  # left
+                            '6': (0, 1),   # right
+                            '7': (-1, -1), # up-left
+                            '9': (-1, 1),  # up-right
+                            '1': (1, -1),  # down-left
+                            '3': (1, 1),   # down-right
+                        }
+                        if key in moves:
+                            dr, dc = moves[key]
+                            self.root.after(0, lambda dr=dr, dc=dc: self.move_keypad_cursor(dr, dc))
+                    # small debounce
+                    time.sleep(0.05)
+
+            threading.Thread(target=_keypad_worker, daemon=True).start()
+        except Exception:
+            # key_pad not available on this platform; ignore
+            pass
         
     def create_game_control_buttons(self):
         # 下部パネルに「ホームへ戻る」「ヒント」「降参」ボタンを中央揃えで横に配置
@@ -305,6 +356,11 @@ class ShogiApp:
                 if piece:
                     self.place_piece(piece, r, c)
         self.draw_captured_pieces()
+        # キーパッドカーソルがあれば再描画
+        try:
+            self.draw_keypad_cursor()
+        except Exception:
+            pass
 
     def place_piece(self, piece, r, c):
         key_char = piece[1] if piece.startswith('+') else piece[0]
@@ -548,6 +604,37 @@ class ShogiApp:
                 x0, y0, x1, y1,
                 fill="#ff0000", outline="", stipple="gray50", tags="drop_hint"
             )
+
+    # --- Keypad cursor helpers ---
+    def draw_keypad_cursor(self):
+        """盤上の現在のキーパッドカーソル位置を表示する（黄色の枠）"""
+        try:
+            self.canvas.delete("keypad_cursor")
+            r, c = self.kp_r, self.kp_c
+            x0 = c * CELL_SIZE
+            y0 = r * CELL_SIZE + self.top_offset
+            x1 = (c + 1) * CELL_SIZE
+            y1 = (r + 1) * CELL_SIZE + self.top_offset
+            self.canvas.create_rectangle(x0, y0, x1, y1, outline="yellow", width=3, tags="keypad_cursor")
+        except Exception:
+            pass
+
+    def move_keypad_cursor(self, dr, dc):
+        """カーソルを移動（dr,dcは行列の増分）"""
+        nr = max(0, min(BOARD_SIZE - 1, self.kp_r + dr))
+        nc = max(0, min(BOARD_SIZE - 1, self.kp_c + dc))
+        self.kp_r, self.kp_c = nr, nc
+        # 表示更新
+        self.draw_keypad_cursor()
+
+    def keypad_confirm(self):
+        """キーパッドの決定キー（5）が押されたときの処理: 現在カーソル位置をクリックしたのと同じ扱いにする"""
+        # create a fake event with coordinates at center of the cell
+        class _E: pass
+        e = _E()
+        e.x = self.kp_c * CELL_SIZE + CELL_SIZE // 2
+        e.y = self.kp_r * CELL_SIZE + CELL_SIZE // 2 + self.top_offset
+        self.on_click(e)
 
     def move_piece(self, sr, sc, r, c):
         piece = self.board[sr][sc]

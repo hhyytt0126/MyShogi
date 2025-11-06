@@ -39,15 +39,20 @@ def read_keypad():
         GPIO.output(col_pin, GPIO.HIGH)
     return None
 
-print("4x4 キーパッドを待機中... (Ctrl+Cで終了)")
+def main():
+    """Standalone mode: poll the keypad and print keys. When imported, this module
+    only exposes `read_keypad()` for other code to call (e.g. shogi.py)."""
+    print("4x4 キーパッドを待機中... (Ctrl+Cで終了)")
+    try:
+        while True:
+            key = read_keypad()
+            if key:
+                print("押下キー:", key)
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        GPIO.cleanup()
+        print("\n終了しました")
 
-try:
-    while True:
-        key = read_keypad()
-        if key:
-            print("押下キー:", key)
-        time.sleep(0.1)
 
-except KeyboardInterrupt:
-    GPIO.cleanup()
-    print("\n終了しました")
+if __name__ == "__main__":
+    main()
