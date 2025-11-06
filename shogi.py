@@ -163,6 +163,10 @@ class ShogiApp:
             # start polling if supported (no-op on non-RPi)
             try:
                 key_pad.start_polling()
+                try:
+                    print(f"[shogi] key_pad.start_polling called")
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -190,6 +194,10 @@ class ShogiApp:
             try:
                 key_pad.register_callback(_on_keypad_key)
                 self._keypad_cb = _on_keypad_key
+                try:
+                    print(f"[shogi] keypad callback registered: {_on_keypad_key.__name__}")
+                except Exception:
+                    pass
             except Exception:
                 self._keypad_cb = None
         except Exception:
@@ -216,10 +224,18 @@ class ShogiApp:
             if getattr(self, '_keypad_cb', None):
                 try:
                     key_pad.unregister_callback(self._keypad_cb)
+                    try:
+                        print(f"[shogi] keypad callback unregistered")
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             try:
                 key_pad.stop_polling()
+                try:
+                    print(f"[shogi] key_pad.stop_polling called")
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:

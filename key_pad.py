@@ -50,11 +50,19 @@ def register_callback(fn):
     """Register a callback fn(key: str) to be called on key press."""
     if fn not in _callbacks:
         _callbacks.append(fn)
+        try:
+            print(f"[key_pad] callback registered: {getattr(fn, '__name__', repr(fn))}")
+        except Exception:
+            pass
 
 def unregister_callback(fn):
     """Unregister a previously registered callback."""
     try:
         _callbacks.remove(fn)
+        try:
+            print(f"[key_pad] callback unregistered: {getattr(fn, '__name__', repr(fn))}")
+        except Exception:
+            pass
     except ValueError:
         pass
 
@@ -103,6 +111,10 @@ def _poll_loop():
 def start_polling():
     """Start background polling thread. Safe to call on non-RPi (no-op)."""
     global _poll_thread, _poll_thread_stop
+    try:
+        print(f"[key_pad] start_polling called (GPIO available: {_GPIO_AVAILABLE})")
+    except Exception:
+        pass
     if not _GPIO_AVAILABLE:
         return
     if _poll_thread and _poll_thread.is_alive():
@@ -114,6 +126,10 @@ def start_polling():
 def stop_polling():
     """Stop the background polling thread."""
     global _poll_thread_stop, _poll_thread
+    try:
+        print(f"[key_pad] stop_polling called")
+    except Exception:
+        pass
     _poll_thread_stop = True
     _poll_thread = None
 
