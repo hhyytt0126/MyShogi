@@ -179,74 +179,35 @@ class ShogiApp:
                 except Exception:
                     pass
 
-                # 5 = confirm (same as mouse click on current cursor)
+                # Promotion choice when pending_move is active: use left/right (4/6) to change choice and 5 to confirm
+                if getattr(self, 'pending_move', None) is not None:
+                    if key == '4':
+                        try:
+                            self._promotion_choice = False
+                            print("[shogi] keypad: promotion_choice set to False (no)")
+                        except Exception:
+                            pass
+                        return
+                    if key == '6':
+                        try:
+                            self._promotion_choice = True
+                            print("[shogi] keypad: promotion_choice set to True (yes)")
+                        except Exception:
+                            pass
+                        return
+                    if key == '5':
+                        # confirm promotion choice
+                        try:
+                            print(f"[shogi] keypad: confirm promotion -> {getattr(self, '_promotion_choice', False)}")
+                        except Exception:
+                            pass
+                        self.root.after(0, lambda: self.choose_promotion(bool(getattr(self, '_promotion_choice', False))))
+                        return
+
+                # (Removed non-1-9 special-key behavior.)
+                # When not in promotion mode, 5 acts as confirm for current cursor (board/komadai/panel)
                 if key == '5':
                     self.root.after(0, lambda: self.keypad_confirm())
-                    return
-
-                # Promotion choice when pending_move is active
-                if getattr(self, 'pending_move', None) is not None:
-                    # Use 'A' for promote (yes), 'B' for no
-                    if key == 'A':
-                        try:
-                            print("[shogi] keypad: choose_promotion(True)")
-                        except Exception:
-                            pass
-                        self.root.after(0, lambda: self.choose_promotion(True))
-                        return
-                    if key == 'B':
-                        try:
-                            print("[shogi] keypad: choose_promotion(False)")
-                        except Exception:
-                            pass
-                        self.root.after(0, lambda: self.choose_promotion(False))
-                        return
-
-                # Cycle/select captured pieces for current player: 'C' = next, 'D' = prev
-                if key in ('C', 'D'):
-                    def _cycle_captured(delta):
-                        cap_list = self.captured_by_sente if self.turn == '先手' else self.captured_by_gote
-                        if not cap_list:
-                            return
-                        if self.selected_captured is None or self.selected_captured[2] != self.turn:
-                            idx = 0 if delta > 0 else len(cap_list) - 1
-                        else:
-                            _, cur_idx, _ = self.selected_captured
-                            idx = (cur_idx + delta) % len(cap_list)
-                        self.root.after(0, lambda idx=idx: self.select_captured_piece(idx, self.turn))
-                    if key == 'C':
-                        _cycle_captured(1)
-                    else:
-                        _cycle_captured(-1)
-                    return
-
-                # '*' = cancel/deselect
-                if key == '*':
-                    def _cancel():
-                        if self.selected_captured is not None:
-                            self.canvas.delete('captured_select')
-                            self.selected_captured = None
-                            return
-                        if self.selected is not None:
-                            self.canvas.delete('select')
-                            self.selected = None
-                    self.root.after(0, _cancel)
-                    return
-
-                # Map other keys to buttons: '0'->hint, '#'->resign, 'A'/'B' handled above
-                if key == '0':
-                    try:
-                        print("[shogi] keypad: show_hint()")
-                    except Exception:
-                        pass
-                    self.root.after(0, lambda: self.show_hint())
-                    return
-                if key == '#':
-                    try:
-                        print("[shogi] keypad: resign_game()")
-                    except Exception:
-                        pass
-                    self.root.after(0, lambda: self.resign_game())
                     return
 
                 # Movement keys (invert vertical as requested previously)
@@ -746,18 +707,53 @@ class ShogiApp:
         try:
             self.canvas.delete("keypad_cursor")
             r, c = self.kp_r, self.kp_c
-            x0 = c * CELL_SIZE
-            y0 = r * CELL_SIZE + self.top_offset
-            x1 = (c + 1) * CELL_SIZE
-            y1 = (r + 1) * CELL_SIZE + self.top_offset
+            # Special rows: -1 = top komadai, BOARD_SIZE = bottom komadai, BOARD_SIZE+1 = panel buttons
+            if r == -1:
+                # top komadai (gote captured) slot
+                x0 = c * CELL_SIZE
+                y0 = 0
+                x1 = (c + 1) * CELL_SIZE
+                y1 = KOMADAI_HEIGHT
+            elif r == BOARD_SIZE:
+                # bottom komadai (sente captured)
+                x0 = c * CELL_SIZE
+                y0 = self.bottom_komadai_y0
+                x1 = (c + 1) * CELL_SIZE
+                y1 = self.bottom_komadai_y0 + KOMADAI_HEIGHT
+            elif r == BOARD_SIZE + 1:
+                # panel buttons: three positions
+                center_x = BOARD_SIZE * CELL_SIZE // 2
+                x_positions = [center_x - 100, center_x, center_x + 100]
+                px = x_positions[max(0, min(2, c))]
+                x0 = px - 40
+                y0 = self.panel_y0 + 80
+                x1 = px + 40
+                y1 = y0 + 40
+            else:
+                x0 = c * CELL_SIZE
+                y0 = r * CELL_SIZE + self.top_offset
+                x1 = (c + 1) * CELL_SIZE
+                y1 = (r + 1) * CELL_SIZE + self.top_offset
             self.canvas.create_rectangle(x0, y0, x1, y1, outline="yellow", width=3, tags="keypad_cursor")
         except Exception:
             pass
 
     def move_keypad_cursor(self, dr, dc):
         """カーソルを移動（dr,dcは行列の増分）"""
-        nr = max(0, min(BOARD_SIZE - 1, self.kp_r + dr))
-        nc = max(0, min(BOARD_SIZE - 1, self.kp_c + dc))
+        # Allow virtual rows:
+        # -1 : top komadai, 0..BOARD_SIZE-1 : board, BOARD_SIZE : bottom komadai, BOARD_SIZE+1 : panel
+        min_r = -1
+        max_r = BOARD_SIZE + 1
+        nr = self.kp_r + dr
+        nr = max(min_r, min(max_r, nr))
+        # nc depends on row
+        if nr == BOARD_SIZE + 1:
+            # panel has 3 positions (0..2)
+            nc = self.kp_c + dc
+            nc = max(0, min(2, nc))
+        else:
+            nc = self.kp_c + dc
+            nc = max(0, min(BOARD_SIZE - 1, nc))
         self.kp_r, self.kp_c = nr, nc
         # 表示更新
         self.draw_keypad_cursor()
@@ -767,6 +763,32 @@ class ShogiApp:
         # create a fake event with coordinates at center of the cell
         class _E: pass
         e = _E()
+        # Handle special rows
+        if self.kp_r == -1:
+            # top komadai (gote)
+            e.x = self.kp_c * CELL_SIZE + CELL_SIZE // 2
+            e.y = KOMADAI_HEIGHT // 2
+            self.on_click(e)
+            return
+        if self.kp_r == BOARD_SIZE:
+            # bottom komadai (sente)
+            e.x = self.kp_c * CELL_SIZE + CELL_SIZE // 2
+            e.y = self.bottom_komadai_y0 + KOMADAI_HEIGHT // 2
+            self.on_click(e)
+            return
+        if self.kp_r == BOARD_SIZE + 1:
+            # panel: map kp_c 0..2 to buttons
+            try:
+                if self.kp_c == 0:
+                    self.go_home()
+                elif self.kp_c == 1:
+                    self.show_hint()
+                else:
+                    self.resign_game()
+            except Exception:
+                pass
+            return
+
         e.x = self.kp_c * CELL_SIZE + CELL_SIZE // 2
         e.y = self.kp_r * CELL_SIZE + CELL_SIZE // 2 + self.top_offset
         self.on_click(e)
@@ -863,6 +885,11 @@ class ShogiApp:
         # クリックハンドラ
         self.canvas.tag_bind("promotion_no", "<Button-1>", lambda e: self.choose_promotion(False))
         self.canvas.tag_bind("promotion_yes", "<Button-1>", lambda e: self.choose_promotion(True))
+        # initialize keypad promotion choice (False=no, True=yes)
+        try:
+            self._promotion_choice = False
+        except Exception:
+            pass
 
     def clear_promotion_ui(self):
         for _id in getattr(self, "promotion_widget_ids", []):
