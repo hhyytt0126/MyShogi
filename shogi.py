@@ -173,11 +173,83 @@ class ShogiApp:
             def _on_keypad_key(key):
                 if not key:
                     return
-                # 5 = confirm
+                # Debug
+                try:
+                    print(f"[shogi._on_keypad_key] key={key} pending_move={self.pending_move} selected_captured={self.selected_captured} selected={self.selected}")
+                except Exception:
+                    pass
+
+                # 5 = confirm (same as mouse click on current cursor)
                 if key == '5':
                     self.root.after(0, lambda: self.keypad_confirm())
                     return
-                # Invert vertical direction: keypad '8' should move down and '2' should move up
+
+                # Promotion choice when pending_move is active
+                if getattr(self, 'pending_move', None) is not None:
+                    # Use 'A' for promote (yes), 'B' for no
+                    if key == 'A':
+                        try:
+                            print("[shogi] keypad: choose_promotion(True)")
+                        except Exception:
+                            pass
+                        self.root.after(0, lambda: self.choose_promotion(True))
+                        return
+                    if key == 'B':
+                        try:
+                            print("[shogi] keypad: choose_promotion(False)")
+                        except Exception:
+                            pass
+                        self.root.after(0, lambda: self.choose_promotion(False))
+                        return
+
+                # Cycle/select captured pieces for current player: 'C' = next, 'D' = prev
+                if key in ('C', 'D'):
+                    def _cycle_captured(delta):
+                        cap_list = self.captured_by_sente if self.turn == '先手' else self.captured_by_gote
+                        if not cap_list:
+                            return
+                        if self.selected_captured is None or self.selected_captured[2] != self.turn:
+                            idx = 0 if delta > 0 else len(cap_list) - 1
+                        else:
+                            _, cur_idx, _ = self.selected_captured
+                            idx = (cur_idx + delta) % len(cap_list)
+                        self.root.after(0, lambda idx=idx: self.select_captured_piece(idx, self.turn))
+                    if key == 'C':
+                        _cycle_captured(1)
+                    else:
+                        _cycle_captured(-1)
+                    return
+
+                # '*' = cancel/deselect
+                if key == '*':
+                    def _cancel():
+                        if self.selected_captured is not None:
+                            self.canvas.delete('captured_select')
+                            self.selected_captured = None
+                            return
+                        if self.selected is not None:
+                            self.canvas.delete('select')
+                            self.selected = None
+                    self.root.after(0, _cancel)
+                    return
+
+                # Map other keys to buttons: '0'->hint, '#'->resign, 'A'/'B' handled above
+                if key == '0':
+                    try:
+                        print("[shogi] keypad: show_hint()")
+                    except Exception:
+                        pass
+                    self.root.after(0, lambda: self.show_hint())
+                    return
+                if key == '#':
+                    try:
+                        print("[shogi] keypad: resign_game()")
+                    except Exception:
+                        pass
+                    self.root.after(0, lambda: self.resign_game())
+                    return
+
+                # Movement keys (invert vertical as requested previously)
                 moves = {
                     '8': (1, 0),   # down (was up)
                     '2': (-1, 0),  # up (was down)
