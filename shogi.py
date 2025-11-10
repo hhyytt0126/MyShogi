@@ -64,7 +64,7 @@ PIECE_COL_MAP = {
 class ShogiApp:
     def __init__(self, root, ai_enabled: bool = False, ai_side: str = '後手', ai_byoyomi_ms: int = 2000):
         self.root = root
-        self.root.title("将棋（持ち駒対応）")
+        self.root.title("将棋")
 
         # --- 全体キャンバスサイズ（持ち駒台を含む） ---
         self.top_offset = KOMADAI_HEIGHT 
@@ -150,6 +150,7 @@ class ShogiApp:
         # カーソル位置（盤上の行・列）を初期化（中央）
         self.kp_r = BOARD_SIZE // 2
         self.kp_c = BOARD_SIZE // 2
+        self.kp_in_captured_select = False
         # 初期表示
         try:
             self.draw_keypad_cursor()
@@ -179,11 +180,43 @@ class ShogiApp:
                 except Exception:
                     pass
 
+                # Result screen choice: use left/right (4/6) to choose and 5 to confirm
+                if getattr(self, '_result_dialog_active', False):
+                    if key == '4':
+                        try:
+                            self._result_choice = 0
+                            self._update_result_buttons()
+                            print("[shogi] keypad: result_choice set to 0 (go home)")
+                        except Exception:
+                            pass
+                        return
+                    if key == '6':
+                        try:
+                            self._result_choice = 1
+                            self._update_result_buttons()
+                            print("[shogi] keypad: result_choice set to 1 (enter review)")
+                        except Exception:
+                            pass
+                        return
+                    if key == '5':
+                        # confirm result choice
+                        try:
+                            if getattr(self, '_result_choice', 0) == 0:
+                                self._result_dialog_active = False
+                                self.root.after(0, lambda: self.go_home())
+                            else:
+                                self._result_dialog_active = False
+                                self.root.after(0, lambda: self.enter_review_mode())
+                        except Exception:
+                            pass
+                        return
+
                 # Promotion choice when pending_move is active: use left/right (4/6) to change choice and 5 to confirm
                 if getattr(self, 'pending_move', None) is not None:
                     if key == '4':
                         try:
                             self._promotion_choice = False
+                            self._update_promotion_choice_visual()
                             print("[shogi] keypad: promotion_choice set to False (no)")
                         except Exception:
                             pass
@@ -191,6 +224,7 @@ class ShogiApp:
                     if key == '6':
                         try:
                             self._promotion_choice = True
+                            self._update_promotion_choice_visual()
                             print("[shogi] keypad: promotion_choice set to True (yes)")
                         except Exception:
                             pass
@@ -404,9 +438,13 @@ class ShogiApp:
 
     def load_pieces(self):
         for piece, (col, row) in PIECE_COL_MAP.items():
+            # スプライトシートから駒画像を切り出す際に、上側を少し下げてオフセット
+            y_offset = 2  # 上側の余分な部分をスキップ
             piece_img = self.sprite.crop((
-                col * self.sprite_width, row * self.sprite_height,
-                (col + 1) * self.sprite_width, (row + 1) * self.sprite_height
+                col * self.sprite_width, 
+                row * self.sprite_height + y_offset,
+                (col + 1) * self.sprite_width, 
+                (row + 1) * self.sprite_height + y_offset
             ))
             piece_img = piece_img.resize((CELL_SIZE, CELL_SIZE))
             key_char = piece[1] if piece.startswith('+') else piece[0]
@@ -426,6 +464,16 @@ class ShogiApp:
                 if piece:
                     self.place_piece(piece, r, c)
         self.draw_captured_pieces()
+        # キーパッドカーソルがあれば再描画
+        try:
+            self.draw_keypad_cursor()
+        except Exception:
+            pass
+        # Ensure captured pieces remain above cursor and other drawings
+        try:
+            self.canvas.tag_raise("captured")
+        except Exception:
+            pass
         # Ensure control windows (buttons) remain above canvas drawings
         try:
             for wid in getattr(self, '_control_window_ids', []):
@@ -433,11 +481,6 @@ class ShogiApp:
                     self.canvas.tag_raise(wid)
                 except Exception:
                     pass
-        except Exception:
-            pass
-        # キーパッドカーソルがあれば再描画
-        try:
-            self.draw_keypad_cursor()
         except Exception:
             pass
 
@@ -616,16 +659,27 @@ class ShogiApp:
         
         x = idx * CELL_SIZE + CELL_SIZE // 2
         self.selected_captured = (piece, idx, side)
-        
+
         # 持ち駒を赤枠で囲む
+        # Make captured selection the same size as board selection (CELL_SIZE x CELL_SIZE),
+        # vertically centered within the komadai area.
+        if side == "先手":
+            komadai_top = self.bottom_komadai_y0
+        else:
+            komadai_top = 0
+        y0 = komadai_top + (KOMADAI_HEIGHT - CELL_SIZE) // 2
+        y1 = y0 + CELL_SIZE
         self.canvas.create_rectangle(
-            idx * CELL_SIZE, y - CELL_SIZE // 2,
-            (idx + 1) * CELL_SIZE, y + CELL_SIZE // 2,
+            idx * CELL_SIZE, y0,
+            (idx + 1) * CELL_SIZE, y1,
             outline="red", width=3, tags="captured_select"
         )
         # 打てるマスをハイライト
         legal = self.get_legal_drop_squares(piece, side)
         self.highlight_drop_targets(legal)
+        # During captured piece selection, show yellow cursor on the red rectangle instead of board position
+        self.kp_in_captured_select = True
+        self.draw_keypad_cursor()
 
     def drop_piece(self, r, c):
         """持ち駒を盤面に打つ"""
@@ -660,6 +714,8 @@ class ShogiApp:
         
         # 盤面に配置
         self.board[r][c] = piece
+        # Clear captured selection and state
+        self.kp_in_captured_select = False
         self.selected_captured = None
         self.canvas.delete("captured_select")
         self.canvas.delete("drop_hint")
@@ -712,28 +768,82 @@ class ShogiApp:
         try:
             self.canvas.delete("keypad_cursor")
             r, c = self.kp_r, self.kp_c
+            
+            # Clear all button states first
+            try:
+                for btn in [self.btn_first, self.btn_prev, self.btn_next, self.btn_last]:
+                    btn.config(state=tk.NORMAL)
+            except Exception:
+                pass
+            try:
+                for btn in [self.btn_home, self.btn_hint, self.btn_resign]:
+                    btn.config(state=tk.NORMAL)
+            except Exception:
+                pass
+            
+            # Review buttons (BOARD_SIZE + 1): set state to ACTIVE
+            if r == BOARD_SIZE + 1:
+                buttons = [self.btn_first, self.btn_prev, self.btn_next, self.btn_last]
+                for i, btn in enumerate(buttons):
+                    if i == c:
+                        btn.config(state=tk.ACTIVE)
+                return
+            
+            # Panel buttons (BOARD_SIZE + 2): set button state to ACTIVE
+            if r == BOARD_SIZE + 2:
+                buttons = [self.btn_home, self.btn_hint, self.btn_resign]
+                for i, btn in enumerate(buttons):
+                    if i == c:
+                        btn.config(state=tk.ACTIVE)
+                return
+            
+            # If in captured piece selection mode, cursor follows the red selection rectangle
+            if getattr(self, 'kp_in_captured_select', False):
+                if self.selected_captured:
+                    piece, idx, side = self.selected_captured
+                    if side == "先手":
+                        komadai_top = self.bottom_komadai_y0
+                    else:
+                        komadai_top = 0
+                    y0 = komadai_top + (KOMADAI_HEIGHT - CELL_SIZE) // 2
+                    y1 = y0 + CELL_SIZE
+                    self.canvas.create_rectangle(
+                        idx * CELL_SIZE, y0,
+                        (idx + 1) * CELL_SIZE, y1,
+                        outline="yellow", width=3, tags="keypad_cursor"
+                    )
+                return
+            # If in promotion UI, show bold cursor on board (so both are visible but distinct)
+            # Promotion UI has its own selection indicator (border colors)
+            if getattr(self, 'pending_move', None) is not None:
+                # Show board cursor where the piece moved from/to with thicker, dotted style
+                sr, sc, r, c_dest, piece, target = self.pending_move
+                x0 = c_dest * CELL_SIZE
+                y0 = r * CELL_SIZE + self.top_offset
+                x1 = (c_dest + 1) * CELL_SIZE
+                y1 = (r + 1) * CELL_SIZE + self.top_offset
+                # Use thicker width and dash pattern to distinguish from normal cursor
+                self.canvas.create_rectangle(x0, y0, x1, y1, outline="cyan", width=4, tags="keypad_cursor")
+                return
             # Special rows: -1 = top komadai, BOARD_SIZE = bottom komadai, BOARD_SIZE+1 = panel buttons
             if r == -1:
-                # top komadai (gote captured) slot
+                # top komadai (gote captured) slot - same size as selected captured piece
+                komadai_top = 0
+                y0_local = komadai_top + (KOMADAI_HEIGHT - CELL_SIZE) // 2
+                y1_local = y0_local + CELL_SIZE
                 x0 = c * CELL_SIZE
-                y0 = 0
+                y0 = y0_local
                 x1 = (c + 1) * CELL_SIZE
-                y1 = KOMADAI_HEIGHT
+                y1 = y1_local
             elif r == BOARD_SIZE:
-                # bottom komadai (sente captured)
+                # bottom komadai (sente captured) - same size as selected captured piece
+                komadai_top = self.bottom_komadai_y0
+                y0_local = komadai_top + (KOMADAI_HEIGHT - CELL_SIZE) // 2
+                y1_local = y0_local + CELL_SIZE
                 x0 = c * CELL_SIZE
-                y0 = self.bottom_komadai_y0
+                y0 = y0_local
                 x1 = (c + 1) * CELL_SIZE
-                y1 = self.bottom_komadai_y0 + KOMADAI_HEIGHT
-            elif r == BOARD_SIZE + 1:
-                # panel buttons: three positions
-                center_x = BOARD_SIZE * CELL_SIZE // 2
-                x_positions = [center_x - 100, center_x, center_x + 100]
-                px = x_positions[max(0, min(2, c))]
-                x0 = px - 40
-                y0 = self.panel_y0 + 80
-                x1 = px + 40
-                y1 = y0 + 40
+                y1 = y1_local
             else:
                 x0 = c * CELL_SIZE
                 y0 = r * CELL_SIZE + self.top_offset
@@ -745,17 +855,43 @@ class ShogiApp:
 
     def move_keypad_cursor(self, dr, dc):
         """カーソルを移動（dr,dcは行列の増分）"""
+        # If in captured piece selection, cursor moves through captured pieces
+        if getattr(self, 'kp_in_captured_select', False) and self.selected_captured:
+            piece, idx, side = self.selected_captured
+            captured = self.captured_by_sente if side == "先手" else self.captured_by_gote
+            nc = idx + dc
+            nc = max(0, min(len(captured) - 1, nc))
+            # Deselect and select new piece
+            self.selected_captured = None
+            if nc < len(captured):
+                self.select_captured_piece(nc, side)
+            self.draw_keypad_cursor()
+            return
+        # If in promotion UI, allow moving away from it (pressing 8 or 2 to exit promotion mode)
+        if getattr(self, 'pending_move', None) is not None:
+            # Vertical movement (8/2) allows exiting promotion UI
+            if dr != 0:  # Moving vertically
+                # Exit promotion mode by clearing pending_move
+                self.pending_move = None
+                self.clear_promotion_ui()
+                # Redraw board and cursor
+                self.draw_pieces()
+                self.draw_keypad_cursor()
+                return
+            # Horizontal movement (4/6) still navigates the promotion choice
+            return
         # Allow virtual rows:
-        # -1 : top komadai, 0..BOARD_SIZE-1 : board, BOARD_SIZE : bottom komadai, BOARD_SIZE+1 : panel
+        # -1 : top komadai, 0..BOARD_SIZE-1 : board, BOARD_SIZE : bottom komadai, BOARD_SIZE+1 : review buttons, BOARD_SIZE+2 : panel
         min_r = -1
-        max_r = BOARD_SIZE + 1
+        max_r = BOARD_SIZE + 2
         nr = self.kp_r + dr
         nr = max(min_r, min(max_r, nr))
         # nc depends on row
-        if nr == BOARD_SIZE + 1:
-            # panel has 3 positions (0..2)
+        if nr == BOARD_SIZE + 1 or nr == BOARD_SIZE + 2:
+            # review buttons have 4 positions (0..3), panel has 3 positions (0..2)
             nc = self.kp_c + dc
-            nc = max(0, min(2, nc))
+            max_c = 3 if nr == BOARD_SIZE + 1 else 2
+            nc = max(0, min(max_c, nc))
         else:
             nc = self.kp_c + dc
             nc = max(0, min(BOARD_SIZE - 1, nc))
@@ -765,6 +901,16 @@ class ShogiApp:
 
     def keypad_confirm(self):
         """キーパッドの決定キー（5）が押されたときの処理: 現在カーソル位置をクリックしたのと同じ扱いにする"""
+        # Handle captured piece drop confirmation
+        if getattr(self, 'kp_in_captured_select', False) and self.selected_captured:
+            piece, idx, side = self.selected_captured
+            # Show drop target selection (move to board row 0 and allow selecting drop position)
+            self.kp_in_captured_select = False
+            self.kp_r = 0
+            self.kp_c = 0
+            self.draw_keypad_cursor()
+            return
+        
         # create a fake event with coordinates at center of the cell
         class _E: pass
         e = _E()
@@ -782,6 +928,20 @@ class ShogiApp:
             self.on_click(e)
             return
         if self.kp_r == BOARD_SIZE + 1:
+            # review buttons: map kp_c 0..3 to buttons
+            try:
+                if self.kp_c == 0:
+                    self.go_first()
+                elif self.kp_c == 1:
+                    self.go_prev()
+                elif self.kp_c == 2:
+                    self.go_next()
+                else:
+                    self.go_last()
+            except Exception:
+                pass
+            return
+        if self.kp_r == BOARD_SIZE + 2:
             # panel: map kp_c 0..2 to buttons
             try:
                 if self.kp_c == 0:
@@ -792,6 +952,12 @@ class ShogiApp:
                     self.resign_game()
             except Exception:
                 pass
+            return
+
+        # If a captured piece is selected, drop it at the board position
+        if self.selected_captured:
+            piece, idx, side = self.selected_captured
+            self.drop_piece(self.kp_r, self.kp_c)
             return
 
         e.x = self.kp_c * CELL_SIZE + CELL_SIZE // 2
@@ -862,8 +1028,8 @@ class ShogiApp:
             x0 = max_w - panel_w
         if y0 + panel_h > max_h:
             y0 = max_h - panel_h
-        # 背景
-        bg = self.canvas.create_rectangle(x0, y0, x0 + panel_w, y0 + panel_h, fill="#fff8dc", outline="#c99", width=2, tags=("promotion_ui",))
+        # 背景 (白背景で盤面との区別を明確に、枠線なし)
+        bg = self.canvas.create_rectangle(x0, y0, x0 + panel_w, y0 + panel_h, fill="white", outline="", tags=("promotion_ui",))
         self.promotion_widget_ids.append(bg)
         # 不成の画像
         normal_key = (base_piece, side)
@@ -877,12 +1043,25 @@ class ShogiApp:
         nx = x0 + 8 + CELL_SIZE // 2
         px = x0 + 8 + CELL_SIZE + 8 + CELL_SIZE // 2
         cy = y0 + 8 + CELL_SIZE // 2
-        # 不成
+        # 不成（初期選択状態）
+        # Create border rectangle for selection indicator (smaller, yellow)
+        nborder = self.canvas.create_rectangle(
+            nx - CELL_SIZE // 2 - 2, cy - CELL_SIZE // 2 - 2,
+            nx + CELL_SIZE // 2 + 2, cy + CELL_SIZE // 2 + 2,
+            outline="yellow", width=2, tags=("promotion_ui", "promotion_no_border")
+        )
+        self.promotion_widget_ids.append(nborder)
         nid = self.canvas.create_image(nx, cy, image=img_normal, tags=("promotion_ui", "promotion_no"))
         self.promotion_widget_ids.append(nid)
         nlabel = self.canvas.create_text(nx, y0 + panel_h - 10, text="不成", font=("Arial", 12), tags=("promotion_ui", "promotion_no"))
         self.promotion_widget_ids.append(nlabel)
-        # 成
+        # 成（非選択状態）
+        pborder = self.canvas.create_rectangle(
+            px - CELL_SIZE // 2 - 2, cy - CELL_SIZE // 2 - 2,
+            px + CELL_SIZE // 2 + 2, cy + CELL_SIZE // 2 + 2,
+            outline="", tags=("promotion_ui", "promotion_yes_border")
+        )
+        self.promotion_widget_ids.append(pborder)
         pid = self.canvas.create_image(px, cy, image=img_promote, tags=("promotion_ui", "promotion_yes"))
         self.promotion_widget_ids.append(pid)
         plabel = self.canvas.create_text(px, y0 + panel_h - 10, text="成", font=("Arial", 12), tags=("promotion_ui", "promotion_yes"))
@@ -893,6 +1072,9 @@ class ShogiApp:
         # initialize keypad promotion choice (False=no, True=yes)
         try:
             self._promotion_choice = False
+            # Store border IDs for keypad navigation updates
+            self._promotion_no_border = nborder
+            self._promotion_yes_border = pborder
         except Exception:
             pass
 
@@ -905,6 +1087,25 @@ class ShogiApp:
         self.promotion_widget_ids = []
         # 画像参照は残しておいても問題ないが、開放したい場合は以下を有効化
         # self._promotion_imgs.clear()
+
+    def _update_promotion_choice_visual(self):
+        """成/不成のキーパッド選択を視覚的に反映"""
+        try:
+            choice = getattr(self, '_promotion_choice', False)
+            no_border = getattr(self, '_promotion_no_border', None)
+            yes_border = getattr(self, '_promotion_yes_border', None)
+            if no_border is None or yes_border is None:
+                return
+            if choice:
+                # Yes is selected
+                self.canvas.itemconfig(no_border, outline="")
+                self.canvas.itemconfig(yes_border, outline="yellow", width=2)
+            else:
+                # No is selected (default)
+                self.canvas.itemconfig(no_border, outline="yellow", width=2)
+                self.canvas.itemconfig(yes_border, outline="")
+        except Exception:
+            pass
 
     def choose_promotion(self, do_promote: bool):
         if not self.pending_move:
@@ -1155,6 +1356,11 @@ class ShogiApp:
         btn_review = tk.Button(self.root, text="感想戦", command=self.enter_review_mode, **btn_opts)
         self.result_widget_ids.append(self.canvas.create_window(BOARD_SIZE*CELL_SIZE//2 - 90, y, window=btn_home))
         self.result_widget_ids.append(self.canvas.create_window(BOARD_SIZE*CELL_SIZE//2 + 90, y, window=btn_review))
+        # キーパッド用の結果画面選択状態を初期化
+        self._result_choice = 0  # 0: ホームへ戻る, 1: 感想戦
+        self._result_dialog_active = True
+        self._result_buttons = [btn_home, btn_review]
+        self._update_result_buttons()
         # キー操作
         self.root.bind('<Escape>', lambda e: self.close_result())
         self.root.bind('r', lambda e: self.reset_game())
@@ -1163,6 +1369,17 @@ class ShogiApp:
         # 感想戦（レビュー）モードへ: 局面履歴の最終手に移動し、レビュー操作のみ有効
         self.close_result()
         self.go_last()
+
+    def _update_result_buttons(self):
+        """結果画面のボタンの状態を更新"""
+        try:
+            for i, btn in enumerate(getattr(self, '_result_buttons', [])):
+                if i == getattr(self, '_result_choice', 0):
+                    btn.config(state=tk.ACTIVE)
+                else:
+                    btn.config(state=tk.NORMAL)
+        except Exception:
+            pass
 
     # --- AI連携 ---
     def schedule_ai_move_if_needed(self):

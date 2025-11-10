@@ -8,6 +8,9 @@ Provides:
 import time
 import threading
 
+# Minimum milliseconds to ignore repeated identical key events (rate-limit)
+MIN_REPEAT_MS = 300
+
 # Try to import RPi.GPIO; if not available, run in mock mode
 try:
     import RPi.GPIO as GPIO  # type: ignore
@@ -47,6 +50,7 @@ _poll_thread = None
 _poll_thread_stop = False
 _last_key = None
 _last_time = 0.0
+_poll_lock = threading.Lock()
 
 def register_callback(fn):
     """Register a callback fn(key: str) to be called on key press."""
@@ -80,7 +84,10 @@ def unregister_all():
     """Unregister all callbacks (force-clean)."""
     try:
         _callbacks.clear()
-        print("[key_pad] all callbacks unregistered")
+        try:
+            print("[key_pad] all callbacks unregistered")
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -89,26 +96,19 @@ def _notify(key: str):
     global _last_key, _last_time
     try:
         now = time.time()
+        # Suppress rapid repeated same-key events (rate-limit)
+        if _last_key is not None and key == _last_key and (now - _last_time) < (MIN_REPEAT_MS / 1000.0):
+            # update last seen timestamp but do not notify callbacks
+            _last_time = now
+            return
         # simple debounce/ghosting suppression: if a different key arrives within 80ms, ignore it
         if _last_key is not None and (now - _last_time) < 0.08 and key != _last_key:
-            try:
-                print(f"[key_pad] suppressed key due to debounce: {key} (last={_last_key})")
-            except Exception:
-                pass
             # update last seen but do not notify callbacks
             _last_key = key
             _last_time = now
             return
         _last_key = key
         _last_time = now
-    except Exception:
-        pass
-    try:
-        print(f"[key_pad] key pressed: {key}")
-    except Exception:
-        pass
-    try:
-        print(f"[key_pad] notifying {len(_callbacks)} callbacks")
     except Exception:
         pass
     for cb in list(_callbacks):
@@ -156,11 +156,12 @@ def start_polling():
         pass
     if not _GPIO_AVAILABLE:
         return
-    if _poll_thread and _poll_thread.is_alive():
-        return
-    _poll_thread_stop = False
-    _poll_thread = threading.Thread(target=_poll_loop, daemon=True)
-    _poll_thread.start()
+    with _poll_lock:
+        if _poll_thread and _poll_thread.is_alive():
+            return
+        _poll_thread_stop = False
+        _poll_thread = threading.Thread(target=_poll_loop, daemon=True)
+        _poll_thread.start()
 
 def stop_polling():
     """Stop the background polling thread."""
@@ -169,8 +170,18 @@ def stop_polling():
         print(f"[key_pad] stop_polling called")
     except Exception:
         pass
-    _poll_thread_stop = True
-    _poll_thread = None
+    # Signal the loop to stop and wait for the thread to exit.
+    with _poll_lock:
+        _poll_thread_stop = True
+        try:
+            t = _poll_thread
+            if t and t.is_alive():
+                try:
+                    t.join(timeout=2.0)
+                except Exception:
+                    pass
+        finally:
+            _poll_thread = None
 
 def simulate_key(key: str):
     """Simulate/inject a key event (useful for desktop testing)."""

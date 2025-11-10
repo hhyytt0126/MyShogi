@@ -45,24 +45,28 @@ class HomeApp:
 			"padx": 20,
 			"pady": 12,
 			"width": 16,
+			"bd": 2,
 		}
 
 		start_btn = tk.Button(self.frame, text="対人戦を開始", command=self.start_game, **btn_style)
-		start_btn.pack(pady=12)
+		start_btn.pack(pady=10)
 
 		ai_btn = tk.Button(self.frame, text="AIと対戦を開始", command=self.start_game_vs_ai, **{**btn_style, "bg": "#8E24AA", "activebackground": "#7B1FA2"})
-		ai_btn.pack(pady=8)
+		ai_btn.pack(pady=10)
 
 		rules_btn = tk.Button(self.frame, text="ルール(簡易)", command=self.show_rules, **{**btn_style, "bg": "#2196F3", "activebackground": "#1e88e5"})
-		rules_btn.pack(pady=8)
+		rules_btn.pack(pady=10)
 
 		exit_btn = tk.Button(self.frame, text="終了", command=self._on_exit, **{**btn_style, "bg": "#e53935", "activebackground": "#d32f2f"})
-		exit_btn.pack(pady=32)
+		exit_btn.pack(pady=10)
 
 		# menu button list for keypad navigation
 		self.menu_buttons = [start_btn, ai_btn, rules_btn, exit_btn]
-		# store original bg colors so we can restore when selection changes
+		# store original bg/fg colors and active colors so we can restore when selection changes
 		self._menu_bg = [b.cget("bg") for b in self.menu_buttons]
+		self._menu_fg = [b.cget("fg") for b in self.menu_buttons]
+		self._menu_abg = [b.cget("activebackground") for b in self.menu_buttons]
+		self._menu_afg = [b.cget("activeforeground") for b in self.menu_buttons]
 		self._menu_index = 0
 		self._update_menu_selection()
 
@@ -83,16 +87,24 @@ class HomeApp:
 				if not key:
 					return
 				if key == '5':
-					# confirm
-					self.menu_buttons[self._menu_index].invoke()
+					# confirm - show visual feedback (temporarily highlight button)
+					btn = self.menu_buttons[self._menu_index]
+					original_relief = btn.cget("relief")
+					original_bd = btn.cget("bd")
+					# flash: change to sunken for visual feedback
+					btn.config(relief=tk.SUNKEN, bd=3)
+					btn.update()
+					self.root.after(100, lambda: btn.config(relief=original_relief, bd=original_bd))
+					# invoke after a short delay
+					self.root.after(50, lambda: self.menu_buttons[self._menu_index].invoke())
 					return
-				if key == '8':
-					# up
+				if key == '2':
+					# up (reversed from board: 2 is up in home)
 					self._menu_index = (self._menu_index - 1) % len(self.menu_buttons)
 					self._update_menu_selection()
 					return
-				if key == '2':
-					# down
+				if key == '8':
+					# down (reversed from board: 8 is down in home)
 					self._menu_index = (self._menu_index + 1) % len(self.menu_buttons)
 					self._update_menu_selection()
 			try:
@@ -112,14 +124,19 @@ class HomeApp:
 		self._cleanup_keypad()
 		# ホームUIを消してゲームを起動（同じTkルートを使う）
 		self.frame.destroy()
-		ShogiApp(self.root, ai_enabled=False)
+		# schedule ShogiApp creation after a short delay to allow polling thread to stop
+		def _start():
+			ShogiApp(self.root, ai_enabled=False)
+		self.root.after(150, _start)
 
 	def start_game_vs_ai(self):
 		from shogi import ShogiApp
 		self._cleanup_keypad()
 		self.frame.destroy()
 		# 先手=人間, 後手=AI (byoyomi 2000ms)
-		ShogiApp(self.root, ai_enabled=True, ai_side='後手', ai_byoyomi_ms=2000)
+		def _start_ai():
+			ShogiApp(self.root, ai_enabled=True, ai_side='後手', ai_byoyomi_ms=2000)
+		self.root.after(150, _start_ai)
 
 	def show_rules(self):
 		message = (
@@ -133,16 +150,31 @@ class HomeApp:
 		messagebox.showinfo("ルール(簡易)", message)
 
 	def _update_menu_selection(self):
-		# Visualize selection by changing relief and focus
+		# Visualize selection by changing to hover-like state (activebackground color)
 		for i, btn in enumerate(self.menu_buttons):
 			if i == self._menu_index:
-				btn.config(relief=tk.SUNKEN)
+				# make selected look like hovered: use activebackground and activeforeground
+				try:
+					abg = self._menu_abg[i]
+					afg = self._menu_afg[i]
+				except Exception:
+					abg = btn.cget("activebackground")
+					afg = btn.cget("activeforeground")
+				# Use RAISED relief to show it's in "hover" state (pressed appearance)
+				btn.config(bg=abg, fg=afg, relief=tk.RAISED, bd=2, state=tk.NORMAL)
 				try:
 					btn.focus_set()
 				except Exception:
 					pass
 			else:
-				btn.config(relief=tk.FLAT)
+				# restore original bg/fg (not active colors) with flat relief
+				try:
+					orig_bg = self._menu_bg[i]
+					orig_fg = self._menu_fg[i]
+				except Exception:
+					orig_bg = btn.cget("bg")
+					orig_fg = btn.cget("fg")
+				btn.config(bg=orig_bg, fg=orig_fg, relief=tk.FLAT, bd=2, state=tk.NORMAL)
 
 	def _cleanup_keypad(self):
 		# Unregister keypad callback and stop polling if available
